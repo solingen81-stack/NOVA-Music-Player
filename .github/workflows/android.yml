@@ -1,50 +1,25 @@
 
-name: Build NOVA APK
-
-on:
-  workflow_dispatch:
-  push:
-    paths:
-      - "nova-android.zip"
-      - ".github/workflows/android.yml"
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Extract Android project
+      - name: Fix Kotlin activity result types
         run: |
-          sudo apt-get update
-          sudo apt-get install -y unzip
-          ARCHIVE=$(find . -maxdepth 1 -type f -iname 'nova-android.zip' | head -n 1)
-          if [ -z "$ARCHIVE" ]; then echo "nova-android.zip not found"; exit 1; fi
-          mkdir extracted
-          unzip -q "$ARCHIVE" -d extracted
-          PROJECT_DIR=$(dirname "$(find extracted -name settings.gradle -print -quit)")
-          if [ -z "$PROJECT_DIR" ] || [ ! -f "$PROJECT_DIR/app/build.gradle" ]; then echo "Android project not found"; exit 1; fi
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
+          root = Path(os.environ["PROJECT_DIR"])
+          p = root / "app/src/main/java/com/nova/player/MainActivity.kt"
+          s = p.read_text()
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.9"
+          s = s.replace(
+              "class MainActivity : Activity() {",
+              "class MainActivity : androidx.activity.ComponentActivity() {"
+          )
 
-      - name: Build debug APK
-        run: gradle -p "$PROJECT_DIR" assembleDebug
+          s = s.replace(
+              "ActivityResultContracts.OpenMultipleDocuments()) { uris ->",
+              "ActivityResultContracts.OpenMultipleDocuments()) { uris: List<Uri> ->"
+          )
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: NOVA-debug-APK
-          path: extracted/**/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
+          p.write_text(s)
+          print("Kotlin activity result types fixed")
+          PY
           
