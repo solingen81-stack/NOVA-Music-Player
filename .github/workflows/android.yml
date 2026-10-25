@@ -1,12 +1,41 @@
 
-      - name: Fix Kotlin activity result types
+name: Build NOVA APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "nova-android.zip"
+      - ".github/workflows/android.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract Android project
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip
+          mkdir -p extracted
+          unzip -oq nova-android.zip -d extracted
+          PROJECT_DIR=$(dirname "$(find extracted -name settings.gradle -print -quit)")
+          if [ -z "$PROJECT_DIR" ] || [ ! -f "$PROJECT_DIR/app/build.gradle" ]; then
+            echo "Android project not found"
+            exit 1
+          fi
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Fix Kotlin file picker
         run: |
           python3 - <<'PY'
           import os
           from pathlib import Path
 
-          root = Path(os.environ["PROJECT_DIR"])
-          p = root / "app/src/main/java/com/nova/player/MainActivity.kt"
+          p = Path(os.environ["PROJECT_DIR"]) / "app/src/main/java/com/nova/player/MainActivity.kt"
           s = p.read_text()
 
           s = s.replace(
@@ -19,7 +48,33 @@
               "ActivityResultContracts.OpenMultipleDocuments()) { uris: List<Uri> ->"
           )
 
+          s = s.replace(
+              "if (uris.isNullOrEmpty())",
+              "if (uris.isEmpty())"
+          )
+
           p.write_text(s)
-          print("Kotlin activity result types fixed")
+          print("Kotlin file picker patched")
           PY
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Build debug APK
+        run: gradle -p "$PROJECT_DIR" assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NOVA-debug-APK
+          path: extracted/**/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
           
